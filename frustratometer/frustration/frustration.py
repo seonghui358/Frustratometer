@@ -854,8 +854,8 @@ def plot_singleresidue_decoy_energy(decoy_energy, native_energy, method='cluster
     return g
 
 
-def write_tcl_script(pdb_file: Union[Path,str], chain: str, mask: np.array, distance_matrix: np.array, distance_cutoff: float, single_frustration: np.array,
-                    pair_frustration: np.array, tcl_script: Union[Path, str] ='frustration.tcl',max_connections: int =None, movie_name: Union[Path, str] =None, still_image_name: Union[Path, str] =None) -> Union[Path, str]:
+def write_tcl_script(pdb_file, chain, mask, distance_matrix, distance_cutoff, single_frustration, pair_frustration, tcl_script='frustration.tcl',
+                     max_connections=None, movie_name=None, still_image_name=None, hide_cartoon=False, min_draw_cutoff=1) -> Union[Path, str]:
     """
     Writes a tcl script that can be run with VMD to superimpose the frustration patterns onto the corresponding PDB structure. 
 
@@ -890,6 +890,7 @@ def write_tcl_script(pdb_file: Union[Path,str], chain: str, mask: np.array, dist
     tcl_script : Path or str
         tcl script file
     """
+
     fo = open(tcl_script, 'w+')
     single_frustration = np.nan_to_num(single_frustration,nan=0,posinf=0,neginf=0)
     pair_frustration = np.nan_to_num(pair_frustration,nan=0,posinf=0,neginf=0)
@@ -924,14 +925,15 @@ def write_tcl_script(pdb_file: Union[Path,str], chain: str, mask: np.array, dist
     fo.write('draw color green\n')
     
 
-    for (r1, r2, f, d ,m) in minimally_frustrated:
+    for (r1, r2, f, d ,m) in minimally_frustrated: # d is physical distance for AWSEM frustratometer
+                                                   # but can be different in general (DCA)
         r1=int(r1)
         r2=int(r2)
-        if abs(r1-r2) == 1: # don't draw interactions between residues adjacent in sequence
+        if abs(r1-r2) - min_draw_cutoff < 0: # don't draw interactions between residues too close in sequence
             continue
         pos1 = selection.select(f'resid {r1} and chain {chain} and (name CB or (resname GLY and name CA))').getCoords()[0]
         pos2 = selection.select(f'resid {r2} and chain {chain} and (name CB or (resname GLY and name CA))').getCoords()[0]
-        distance = np.linalg.norm(pos1 - pos2)
+        distance = np.linalg.norm(pos1 - pos2) # distance is physical distance to determine what is protein or water-mediated
         if d > 9.5 or d < 3.5:
             continue
         fo.write(f'lassign [[atomselect top "resid {r1} and name CA and chain {chain}"] get {{x y z}}] pos1\n')
@@ -951,6 +953,8 @@ def write_tcl_script(pdb_file: Union[Path,str], chain: str, mask: np.array, dist
     for (r1, r2, f ,d, m) in frustrated:
         r1=int(r1)
         r2=int(r2)
+        if abs(r1-r2) - min_draw_cutoff < 0: # don't draw interactions between residues too close in sequence
+            continue
         if d > 9.5 or d < 3.5:
             continue
         fo.write(f'lassign [[atomselect top "resid {r1} and name CA and chain {chain}"] get {{x y z}}] pos1\n')
@@ -960,14 +964,24 @@ def write_tcl_script(pdb_file: Union[Path,str], chain: str, mask: np.array, dist
         else:
             fo.write(f'draw line $pos1 $pos2 style dashed width 2\n')
     
-    fo.write('''mol delrep top 0
-            mol color Beta
-            mol representation NewCartoon 0.300000 10.000000 4.100000 0
-            mol selection all
-            mol material Opaque
-            mol addrep top
-            color scale method GWR
-            ''')
+    if hide_cartoon:
+        fo.write('''mol delrep top 0
+                mol color Beta
+                mol representation VDW 0.500000 12.000000
+                mol selection name CA
+                mol material Opaque
+                mol addrep top
+                color scale method GWR
+                ''')
+    else:
+        fo.write('''mol delrep top 0
+                mol color Beta
+                mol representation NewCartoon 0.300000 10.000000 4.100000 0
+                mol selection all
+                mol material Opaque
+                mol addrep top
+                color scale method GWR
+                ''')
     
     if movie_name:
         fo.write('''axes location Off
